@@ -25,6 +25,11 @@ public class MonitorDirUtil {
     private final boolean recursiveDirectorySearch;
     private final Path spoolDirPath;
 
+
+    public static MonitorDirUtil.Builder builder(){
+        return new Builder();
+    }
+
     private MonitorDirUtil (File spoolDirectory, String completedSuffix, String includePattern, String ignorePattern, boolean recursiveDirectorySearch){
 
         // Sanity checks
@@ -57,7 +62,7 @@ public class MonitorDirUtil {
      *            the directory to gather files from
      * @return list of files within the passed in directory
      */
-    private List<File> getCandidateFiles(final Path directory) {
+    public List<File> getCandidateFiles(final Path directory) {
         Preconditions.checkNotNull(directory);
         final List<File> candidateFiles = new ArrayList<>();
         try {

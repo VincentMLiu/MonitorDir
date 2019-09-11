@@ -125,7 +125,7 @@ public class FtpUtil {
     }
 
     /*
-     * 从FTP服务器下载文件W
+     * 从FTP服务器下载文件
      *
      * @param ftpHost FTP IP地址
      * @param ftpUserName FTP 用户名
