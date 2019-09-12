@@ -21,12 +21,12 @@ public class MonitorDirUpload2Ftp {
         Properties pp = new Properties();
 
         //scanDirs
-        ScanDirThread st = new ScanDirThread();
-        st.run();
+        Thread scanTd = new Thread(new ScanDirThread());
+        scanTd.start();
 
     }
 
-    public static class ScanDirThread extends Thread {
+    public static class ScanDirThread implements Runnable {
         public void run() {
             MonitorDirUtil monitorDirUtil = MonitorDirUtil.builder().build();
             List<File> candidateFiles = monitorDirUtil.getCandidateFiles(Paths.get(new File("").getAbsolutePath()));
