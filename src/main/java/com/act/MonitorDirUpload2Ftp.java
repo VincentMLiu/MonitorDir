@@ -1,6 +1,8 @@
 package com.act;
 
+import com.act.Utils.ConfigerationUtils;
 import com.act.Utils.MonitorDirUtil;
+import jdk.internal.util.xml.PropertiesDefaultHandler;
 
 import java.io.File;
 import java.nio.file.Paths;
@@ -18,7 +20,9 @@ public class MonitorDirUpload2Ftp {
     public static void main(String[] args){
         //Init Configs
 
-        Properties pp = new Properties();
+        ConfigerationUtils.init(args[0]);
+
+        ConfigerationUtils.get("","");
 
         //scanDirs
         Thread scanTd = new Thread(new ScanDirThread());
