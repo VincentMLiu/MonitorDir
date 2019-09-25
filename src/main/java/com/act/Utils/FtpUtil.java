@@ -240,4 +240,36 @@ public class FtpUtil {
         return success;
     }
 
+
+    /**
+     * 获取FTPClient对象
+     *
+     * @param ftpHost     FTP主机服务器
+     * @param ftpPassword FTP 登录密码
+     * @param ftpUserName FTP登录用户名
+     * @param ftpPort     FTP端口 默认为21
+     * @return
+     */
+    public static FTPClient getThreadSafeFtpClient(String ftpHost, String ftpUserName, String ftpPassword, int ftpPort){
+        FTPClient tFtp = new FTPClient();
+        try {
+            tFtp.connect(ftpHost, ftpPort);// 连接FTP服务器
+            tFtp.login(ftpUserName, ftpPassword);// 登陆FTP服务器
+            if (!FTPReply.isPositiveCompletion(tFtp.getReplyCode())) {
+                System.out.println("未连接到FTP，用户名或密码错误。");
+                tFtp.disconnect();
+            } else {
+                System.out.println("FTP连接成功。");
+            }
+        } catch (SocketException e) {
+            e.printStackTrace();
+            System.out.println("FTP的IP地址可能错误，请正确配置。");
+        } catch (IOException e) {
+            e.printStackTrace();
+            System.out.println("FTP的端口错误,请正确配置。");
+        }
+
+        return tFtp;
+    }
+
 }
