@@ -23,7 +23,7 @@ import java.util.concurrent.LinkedBlockingQueue;
 public class MonitorDirUpload2Ftp {
 
     //存放待处理的文件
-     public static LinkedBlockingQueue<List<File>> deallingQueue = new LinkedBlockingQueue<List<File>>(100);
+     public static LinkedBlockingQueue<List<File>> dealingQueue = new LinkedBlockingQueue<List<File>>(100);
 
         //监控基础目录
         private static String monitorFilePath;
@@ -49,7 +49,7 @@ public class MonitorDirUpload2Ftp {
         //如果需要扫描指定天
         private static String theDay;
 
-    public static void main(String[] args){
+    public static void main(String[] args) throws IOException {
         //Init Configs
         //args[0] = properties fileName
         //WINDOWS: {resource dir}/monitorDir.properties
@@ -141,8 +141,8 @@ public class MonitorDirUpload2Ftp {
                         candidateFiles = monitorDirUtil.getCandidateFiles(Paths.get(monitorFilePath + File.separator + datePath));
                     }
                     if(!candidateFiles.isEmpty()){
-                     deallingQueue.put(candidateFiles);
-                     System.out.println("NOW deallingQueue has" + deallingQueue);
+                        dealingQueue.put(candidateFiles);
+                     System.out.println("NOW dealingQueue has" + dealingQueue);
                     }
                     Thread.sleep(scanningFrequency);
                 }
@@ -160,10 +160,11 @@ public class MonitorDirUpload2Ftp {
         private String ftpUserName;
         private String ftpPassword;
         private String ftpRemotePath;
+        private String workingDir;
         private int ftpPort;
         private FTPClient tFtp;
 
-        UploadThread( String name, String ftpHost, String ftpUserName, String ftpPassword, int ftpPort, String ftpRemotePath) {
+        UploadThread( String name, String ftpHost, String ftpUserName, String ftpPassword, int ftpPort, String ftpRemotePath) throws IOException {
             this.threadName = name;
             this.ftpHost = ftpHost;
             this.ftpUserName = ftpUserName;
@@ -172,6 +173,7 @@ public class MonitorDirUpload2Ftp {
             this.ftpPort = ftpPort;
             System.out.println("Creating " +  threadName );
             this.tFtp = FtpUtil.getThreadSafeFtpClient(ftpHost, ftpUserName, ftpPassword, ftpPort);
+            this.workingDir = tFtp.printWorkingDirectory();
         }
 
         public void start () {
@@ -185,36 +187,38 @@ public class MonitorDirUpload2Ftp {
         public void run() {
             try {
                 while(true){
-                    List<File> oneBatch = deallingQueue.take();
+                    List<File> oneBatch = dealingQueue.take();
                     if(oneBatch!=null && !oneBatch.isEmpty()){
 
                         for(File file : oneBatch){
                             //check wether tFtp isConnected
-                            if(!tFtp.isConnected()){
+                            while(!tFtp.isConnected()){
+                                System.out.println("");
                                 tFtp = FtpUtil.getThreadSafeFtpClient(ftpHost, ftpUserName, ftpPassword, ftpPort);
+                                Thread.sleep(30000l);
                             }
-                            System.out.println("[" + Thread.currentThread().getName() + "] dealling file [" + file.getAbsolutePath() + "]");
+                            System.out.println("[" + Thread.currentThread().getName() + "] dealing file [" + file.getAbsolutePath() + "]");
+                            //GET Path
+                            String hourDirAbs = file.getParent();
+                            String dayDirAbs = new File(file.getParent()).getParent();
+                            String hourDir = hourDirAbs.substring(hourDirAbs.lastIndexOf(File.separator) + 1);
+                            String dayDir = dayDirAbs.substring(dayDirAbs.lastIndexOf(File.separator) + 1);
+                            String wholePath = ftpRemotePath + File.separator + dayDir + File.separator + hourDir;
 
-                            String hourDir = file.getParent();
-                            String dayDir = new File(file.getParent()).getParent();
+                            //upload to ftp
+                            Boolean uploadSucceed = this.uploadFile(wholePath, file.getName(),  file);
+                            if(uploadSucceed){
+                                System.out.println("Successfully upload file to [" + wholePath + File.separator + file.getName() + "]");
+                                File loadedFile = new File(file.getAbsolutePath() + afterUploadSuffix );
+                                file.renameTo(loadedFile);
+                                System.out.println("Complete of dealing file [" + file.getAbsolutePath() + "] and rename to [" + loadedFile.getName() + "]");
+                            }else{
+                                System.out.println("Unsuccessfully dealing file [" + file.getAbsolutePath() + "], will scan it later!");
+                            }
 
-                            System.out.println( hourDir.substring(hourDir.lastIndexOf(File.separator) + 1));
-                            System.out.println( dayDir.substring(dayDir.lastIndexOf(File.separator) + 1));
-                            System.out.println( ftpRemotePath);
-
-
-
-
-
-
-                            File loadedFile = new File(file.getAbsolutePath() + afterUploadSuffix );
-                            file.renameTo(loadedFile);
-
-
-                            System.out.println("Complete of dealling and rename to " + loadedFile.getName());
                         }
                     }else {
-                        System.out.println("There is no new Files need to deal");
+                        System.out.println("This batch is empty");
                     }
 
                     Thread.sleep(10000l);
@@ -238,13 +242,16 @@ public class MonitorDirUpload2Ftp {
                 InputStream input = new FileInputStream(localFile);
                 tFtp.enterLocalPassiveMode();
                 tFtp.setBufferSize(1024);
-                tFtp.setFileType(FTP.BINARY_FILE_TYPE);
+                success = tFtp.setFileType(FTP.BINARY_FILE_TYPE);
                 tFtp.setControlEncoding("UTF-8");
-                tFtp.changeWorkingDirectory(path);
-                tFtp.storeFile(filename, input);
+                success = tFtp.changeWorkingDirectory(workingDir + path);
+                if(!success){
+                    System.out.println("ChangeWorkingDirectory [" + workingDir + path + "] = " + success);
+                    return success;
+                }
+                success = tFtp.storeFile(filename, input);
                 input.close();
-                tFtp.logout();
-                success = true;
+
             } catch (IOException e) {
                 e.printStackTrace();
             }
