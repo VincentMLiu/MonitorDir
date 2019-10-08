@@ -66,6 +66,8 @@ public class MonitorDirUpload2Ftp {
         ftpPassword = ConfigerationUtils.get("ftpPassword", "fraud@2018");
         ftpPort = Integer.parseInt(ConfigerationUtils.get("ftpPort", "21"));
         ftpRemotePath = ConfigerationUtils.get("ftpRemotePath", "/");
+        File monitorDir = new File(monitorFilePath);
+        monitorDir.list();
 
         if(args.length > 1){
             theDay = args[1];
