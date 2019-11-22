@@ -2,7 +2,7 @@ package com.act;
 
 import com.act.Utils.ConfigerationUtils;
 import com.act.Utils.FtpUtil;
-import com.act.Utils.MonitorDirUtil;
+import com.act.Utils.MonitorDirUtilPartitionedQueue;
 import org.apache.commons.lang.StringUtils;
 import org.apache.commons.net.ftp.FTP;
 import org.apache.commons.net.ftp.FTPClient;
@@ -15,16 +15,16 @@ import java.io.InputStream;
 import java.nio.file.Files;
 import java.nio.file.Paths;
 import java.text.SimpleDateFormat;
+import java.util.ArrayList;
 import java.util.Calendar;
 import java.util.Date;
 import java.util.List;
-import java.util.SimpleTimeZone;
 import java.util.concurrent.LinkedBlockingQueue;
 
-public class MonitorDirUpload2Ftp {
+public class MonitorDirUpload2FtpPartitionedQueue {
 
     //存放待处理的文件
-     public static LinkedBlockingQueue<List<File>> dealingQueue = new LinkedBlockingQueue<List<File>>(100);
+//     public static LinkedBlockingQueue<List<File>> dealingQueue = new LinkedBlockingQueue<List<File>>(100);
 
         //监控基础目录
         private static String monitorFilePath;
@@ -56,6 +56,8 @@ public class MonitorDirUpload2Ftp {
         //如果需要扫描指定天
         private static String theDay;
 
+        private static List<UploadThread> uploadedThreadList = new ArrayList<UploadThread>();
+
     public static void main(String[] args) throws IOException {
         //Init Configs
         //args[0] = properties fileName
@@ -65,7 +67,7 @@ public class MonitorDirUpload2Ftp {
 
         monitorFilePath = ConfigerationUtils.get("monitorFilePath", "/");
         includePattern = ConfigerationUtils.get("includePattern", "^\\d{14,}\\.\\d{5,}\\.\\d{5,}\\w.+(.pcm)$");
-        ignorePattern = ConfigerationUtils.get("ignorePattern", ".+(.tmp|.uploaded)$");
+        ignorePattern = ConfigerationUtils.get("ignorePattern", ".+(.tmp|.uploaded|.loading)$");
         afterUploadSuffix = ConfigerationUtils.get("afterUploadSuffix", ".uploaded");
         scanningFrequency = Long.parseLong(ConfigerationUtils.get("scanningFrequency", "10000"));
         ftpHost = ConfigerationUtils.get("ftpHost", "172.168.12.112");
@@ -108,9 +110,9 @@ public class MonitorDirUpload2Ftp {
         for(int utn = 0; utn < uploadThreadNum; utn++){
             //有多少个线程就先创造多少个QUEUE，模仿kafka的分片，scan_thread写入，upload_thread读取。
 
-
             UploadThread uploadTd = new UploadThread("upload-td-num[" + utn + "]", ftpHost, ftpUserName, ftpPassword, ftpPort, ftpRemotePath);
             uploadTd.start();
+            uploadedThreadList.add(uploadTd);
         }
 
 
@@ -121,6 +123,7 @@ public class MonitorDirUpload2Ftp {
         private String threadName;
         private int dayDifference;
         private SimpleDateFormat yyyyMMdd = new SimpleDateFormat("yyyyMMdd");
+        private SimpleDateFormat yyyy_MM_ddHHmmss = new SimpleDateFormat("yyyy-MM-dd HH:mm:ss");
         private String baseMonitorDirPath;
 
         ScanDirThread( String baseMonitorDirPath, String name, String theDay) {
@@ -147,7 +150,7 @@ public class MonitorDirUpload2Ftp {
         }
 
         public void run() {
-            MonitorDirUtil monitorDirUtil = MonitorDirUtil.builder()
+            MonitorDirUtilPartitionedQueue monitorDirUtil = MonitorDirUtilPartitionedQueue.builder()
                     .spoolDirectory(new File(baseMonitorDirPath))
                     .includePattern(includePattern)
                     .ignorePattern(ignorePattern)
@@ -155,20 +158,24 @@ public class MonitorDirUpload2Ftp {
                     .build();
 
             try {
+                int scanningNo = 0;
                 while(true){
                     List<File> candidateFiles;
+                    String scanningPath;
                     if(StringUtils.isNotBlank(theDay)){
-                        candidateFiles = monitorDirUtil.getCandidateFiles(Paths.get(baseMonitorDirPath + File.separator + theDay));
+                        scanningPath = baseMonitorDirPath + File.separator + theDay;
+                        candidateFiles = monitorDirUtil.getCandidateFiles(Paths.get(scanningPath));
                     }else{
                         Calendar cal = Calendar.getInstance();
                         cal.setTime(new Date());
                         cal.add(Calendar.DATE, dayDifference);
                         String datePath = yyyyMMdd.format(cal.getTime());
-
-                        candidateFiles = monitorDirUtil.getCandidateFiles(Paths.get(baseMonitorDirPath + File.separator + datePath));
+                        scanningPath = baseMonitorDirPath + File.separator + datePath;
+                        candidateFiles = monitorDirUtil.getCandidateFiles(Paths.get(scanningPath));
                     }
                     if(!candidateFiles.isEmpty()){
-                        dealingQueue.put(candidateFiles);
+                        uploadedThreadList.get(scanningNo%uploadThreadNum).putFileListIntoDealingQueue(candidateFiles);
+                        System.out.println(yyyy_MM_ddHHmmss.format(new Date()) +" Put "+ candidateFiles.size() + " files of [" + scanningPath + "] into thread number" + scanningNo%uploadThreadNum);
                     }
                     Thread.sleep(scanningFrequency);
                 }
@@ -189,6 +196,8 @@ public class MonitorDirUpload2Ftp {
         private String workingDir;
         private int ftpPort;
         private FTPClient tFtp;
+
+        public  LinkedBlockingQueue<List<File>> dealingQueue = new LinkedBlockingQueue<List<File>>(100);
 
         UploadThread( String name, String ftpHost, String ftpUserName, String ftpPassword, int ftpPort, String ftpRemotePath) throws IOException {
             this.threadName = name;
@@ -297,6 +306,11 @@ public class MonitorDirUpload2Ftp {
                 e.printStackTrace();
             }
             return success;
+        }
+
+
+        public synchronized void putFileListIntoDealingQueue(List<File> candidateFilesList) throws InterruptedException {
+            this.dealingQueue.put(candidateFilesList);
         }
     }
 

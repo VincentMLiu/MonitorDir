@@ -18,10 +18,9 @@ import java.text.SimpleDateFormat;
 import java.util.Calendar;
 import java.util.Date;
 import java.util.List;
-import java.util.SimpleTimeZone;
 import java.util.concurrent.LinkedBlockingQueue;
 
-public class MonitorDirUpload2Ftp {
+public class MonitorHuiZhiDirUpload2Ftp {
 
     //存放待处理的文件
      public static LinkedBlockingQueue<List<File>> dealingQueue = new LinkedBlockingQueue<List<File>>(100);
@@ -53,8 +52,6 @@ public class MonitorDirUpload2Ftp {
         //拷贝到哪
         private static String copyToBasicPath;
 
-        //如果需要扫描指定天
-        private static String theDay;
 
     public static void main(String[] args) throws IOException {
         //Init Configs
@@ -80,35 +77,15 @@ public class MonitorDirUpload2Ftp {
         allowCopy = Boolean.getBoolean(ConfigerationUtils.get("allowCopy", "false"));
         copyToBasicPath = ConfigerationUtils.get("copyToBasicPath", "/home");
 
-        File monitorDir = new File(monitorFilePath);
-        File[] pointList = monitorDir.listFiles();
 
-        for(int i = 0 ; i < pointList.length ; i++){
 
-            if(pointList[i].isDirectory()){
-                if(args.length > 1){
-                    theDay = args[1];
-                    //scanDirs 指定天
-                    ScanDirThread scanDir_td_today = new ScanDirThread(pointList[i].getAbsolutePath(), "scanDir-td-theDay[" + i + "]", theDay);
-                    scanDir_td_today.start();
-                }else {
-                    //scanDirs 今天
-                    ScanDirThread scanDir_td_today = new ScanDirThread(pointList[i].getAbsolutePath(), "scanDir-td-today[" + i + "]", 0);
-                    scanDir_td_today.start();
+        ScanDirThread scanDir_td_today = new ScanDirThread(monitorFilePath, "scanDir-td-theDay[" + 1 + "]");
+        scanDir_td_today.start();
 
-                    //scanDirs 昨天
-                    ScanDirThread scanDir_td_yesterday = new ScanDirThread(pointList[i].getAbsolutePath(), "scanDir-td-yesterday[" + i + "]", -1);
-                    scanDir_td_yesterday.start();
-                }
-            }
-        }
 
 
         //upload TO FTP
         for(int utn = 0; utn < uploadThreadNum; utn++){
-            //有多少个线程就先创造多少个QUEUE，模仿kafka的分片，scan_thread写入，upload_thread读取。
-
-
             UploadThread uploadTd = new UploadThread("upload-td-num[" + utn + "]", ftpHost, ftpUserName, ftpPassword, ftpPort, ftpRemotePath);
             uploadTd.start();
         }
@@ -119,24 +96,15 @@ public class MonitorDirUpload2Ftp {
     public static class ScanDirThread implements Runnable {
         private Thread t;
         private String threadName;
-        private int dayDifference;
-        private SimpleDateFormat yyyyMMdd = new SimpleDateFormat("yyyyMMdd");
         private String baseMonitorDirPath;
 
-        ScanDirThread( String baseMonitorDirPath, String name, String theDay) {
-            this.dayDifference = 0;
-            threadName = name + theDay;
+        ScanDirThread( String baseMonitorDirPath, String name) {
             this.baseMonitorDirPath = baseMonitorDirPath;
-            System.out.println("Creating " +  threadName + " to monitor [" + baseMonitorDirPath + "/" + theDay + "]");
-        }
-
-
-        ScanDirThread( String baseMonitorDirPath, String name, int dayDifference) {
-            this.dayDifference = dayDifference;
-            threadName = name + dayDifference;
-            this.baseMonitorDirPath = baseMonitorDirPath;
+            this.threadName = name;
             System.out.println("Creating " +  threadName + " to monitor [" + baseMonitorDirPath + "]");
         }
+
+
 
         public void start () {
             System.out.println("Starting " +  threadName );
@@ -157,16 +125,7 @@ public class MonitorDirUpload2Ftp {
             try {
                 while(true){
                     List<File> candidateFiles;
-                    if(StringUtils.isNotBlank(theDay)){
-                        candidateFiles = monitorDirUtil.getCandidateFiles(Paths.get(baseMonitorDirPath + File.separator + theDay));
-                    }else{
-                        Calendar cal = Calendar.getInstance();
-                        cal.setTime(new Date());
-                        cal.add(Calendar.DATE, dayDifference);
-                        String datePath = yyyyMMdd.format(cal.getTime());
-
-                        candidateFiles = monitorDirUtil.getCandidateFiles(Paths.get(baseMonitorDirPath + File.separator + datePath));
-                    }
+                    candidateFiles = monitorDirUtil.getCandidateFiles(Paths.get(baseMonitorDirPath));
                     if(!candidateFiles.isEmpty()){
                         dealingQueue.put(candidateFiles);
                     }
@@ -248,7 +207,7 @@ public class MonitorDirUpload2Ftp {
                             if(uploadSucceed){
                                 //拷贝到其他目录
                                 if(allowCopy && StringUtils.isNotBlank(copyToBasicPath)){
-                                    String copyToPath = copyToBasicPath +  uploadedPath + file.getName();
+                                    String copyToPath = copyToBasicPath + file.getName();
                                     Files.copy(file.toPath(), new File(copyToPath).toPath());
                                 }
                                 File loadedFile = new File(file.getAbsolutePath() + afterUploadSuffix );

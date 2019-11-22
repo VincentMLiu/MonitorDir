@@ -21,8 +21,14 @@ public class AppTest
 
     public static void main(String[] args) {
         String monitorPath = "/opt/ftp_gr/records/0011";
-        String parentPath = "/opt/ftp_gr/records/0011/20190829";
-        System.out.println(parentPath.substring(parentPath.lastIndexOf("/") + 1));
+        String parentPath = "/opt/ftp_gr/records";
+        System.out.println(parentPath.lastIndexOf("/"));
+        int i = parentPath.lastIndexOf("/");
+        if(i < 0 || i > parentPath.length()){
+
+        }else{
+            System.out.println(parentPath.substring(parentPath.lastIndexOf("/")));
+        }
 
     }
 }
