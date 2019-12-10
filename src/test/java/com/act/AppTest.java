@@ -30,5 +30,9 @@ public class AppTest
             System.out.println(parentPath.substring(parentPath.lastIndexOf("/")));
         }
 
+
+        String fileName = "11111111111.txt.loading";
+        System.out.println(fileName.substring(0, fileName.lastIndexOf(".loading")));
+
     }
 }

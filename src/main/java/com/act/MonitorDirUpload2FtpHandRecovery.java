@@ -2,7 +2,7 @@ package com.act;
 
 import com.act.Utils.ConfigerationUtils;
 import com.act.Utils.FtpUtil;
-import com.act.Utils.MonitorDirUtilPartitionedQueue;
+import com.act.Utils.MonitorDirUtil;
 import org.apache.commons.lang.StringUtils;
 import org.apache.commons.net.ftp.FTP;
 import org.apache.commons.net.ftp.FTPClient;
@@ -15,16 +15,15 @@ import java.io.InputStream;
 import java.nio.file.Files;
 import java.nio.file.Paths;
 import java.text.SimpleDateFormat;
-import java.util.ArrayList;
 import java.util.Calendar;
 import java.util.Date;
 import java.util.List;
 import java.util.concurrent.LinkedBlockingQueue;
 
-public class MonitorDirUpload2FtpPartitionedQueue {
+public class MonitorDirUpload2FtpHandRecovery {
 
     //存放待处理的文件
-//     public static LinkedBlockingQueue<List<File>> dealingQueue = new LinkedBlockingQueue<List<File>>(100);
+     public static LinkedBlockingQueue<List<File>> dealingQueue = new LinkedBlockingQueue<List<File>>(100);
 
         //监控基础目录
         private static String monitorFilePath;
@@ -56,8 +55,6 @@ public class MonitorDirUpload2FtpPartitionedQueue {
         //如果需要扫描指定天
         private static String theDay;
 
-        private static List<UploadThread> uploadedThreadList = new ArrayList<UploadThread>();
-
     public static void main(String[] args) throws IOException {
         //Init Configs
         //args[0] = properties fileName
@@ -67,7 +64,7 @@ public class MonitorDirUpload2FtpPartitionedQueue {
 
         monitorFilePath = ConfigerationUtils.get("monitorFilePath", "/");
         includePattern = ConfigerationUtils.get("includePattern", "^\\d{14,}\\.\\d{5,}\\.\\d{5,}\\w.+(.pcm)$");
-        ignorePattern = ConfigerationUtils.get("ignorePattern", ".+(.tmp|.uploaded|.loading)$");
+        ignorePattern = ConfigerationUtils.get("ignorePattern", ".+(.tmp|.uploaded)$");
         afterUploadSuffix = ConfigerationUtils.get("afterUploadSuffix", ".uploaded");
         scanningFrequency = Long.parseLong(ConfigerationUtils.get("scanningFrequency", "10000"));
         ftpHost = ConfigerationUtils.get("ftpHost", "172.168.12.112");
@@ -88,20 +85,10 @@ public class MonitorDirUpload2FtpPartitionedQueue {
         for(int i = 0 ; i < pointList.length ; i++){
 
             if(pointList[i].isDirectory()){
-                if(args.length > 1){
-                    theDay = args[1];
-                    //scanDirs 指定天
-                    ScanDirThread scanDir_td_today = new ScanDirThread(pointList[i].getAbsolutePath(), "scanDir-td-theDay[" + i + "]", theDay);
-                    scanDir_td_today.start();
-                }else {
-                    //scanDirs 今天
-                    ScanDirThread scanDir_td_today = new ScanDirThread(pointList[i].getAbsolutePath(), "scanDir-td-today[" + i + "]", 0);
-                    scanDir_td_today.start();
-
-                    //scanDirs 昨天
-                    ScanDirThread scanDir_td_yesterday = new ScanDirThread(pointList[i].getAbsolutePath(), "scanDir-td-yesterday[" + i + "]", -1);
-                    scanDir_td_yesterday.start();
-                }
+                theDay = args[1];
+                //scanDirs 指定天
+                ScanDirThread scanDir_td_today = new ScanDirThread(pointList[i].getAbsolutePath(), "scanDir-td-theDay[" + i + "]", theDay);
+                scanDir_td_today.start();
             }
         }
 
@@ -110,9 +97,9 @@ public class MonitorDirUpload2FtpPartitionedQueue {
         for(int utn = 0; utn < uploadThreadNum; utn++){
             //有多少个线程就先创造多少个QUEUE，模仿kafka的分片，scan_thread写入，upload_thread读取。
 
+
             UploadThread uploadTd = new UploadThread("upload-td-num[" + utn + "]", ftpHost, ftpUserName, ftpPassword, ftpPort, ftpRemotePath);
             uploadTd.start();
-            uploadedThreadList.add(uploadTd);
         }
 
 
@@ -123,7 +110,6 @@ public class MonitorDirUpload2FtpPartitionedQueue {
         private String threadName;
         private int dayDifference;
         private SimpleDateFormat yyyyMMdd = new SimpleDateFormat("yyyyMMdd");
-        private SimpleDateFormat yyyy_MM_ddHHmmss = new SimpleDateFormat("yyyy-MM-dd HH:mm:ss");
         private String baseMonitorDirPath;
 
         ScanDirThread( String baseMonitorDirPath, String name, String theDay) {
@@ -150,7 +136,7 @@ public class MonitorDirUpload2FtpPartitionedQueue {
         }
 
         public void run() {
-            MonitorDirUtilPartitionedQueue monitorDirUtil = MonitorDirUtilPartitionedQueue.builder()
+            MonitorDirUtil monitorDirUtil = MonitorDirUtil.builder()
                     .spoolDirectory(new File(baseMonitorDirPath))
                     .includePattern(includePattern)
                     .ignorePattern(ignorePattern)
@@ -158,28 +144,12 @@ public class MonitorDirUpload2FtpPartitionedQueue {
                     .build();
 
             try {
-                int scanningNo = 0;
-                while(true){
-                    List<File> candidateFiles;
-                    String scanningPath;
-                    if(StringUtils.isNotBlank(theDay)){
-                        scanningPath = baseMonitorDirPath + File.separator + theDay;
-                        candidateFiles = monitorDirUtil.getCandidateFiles(Paths.get(scanningPath));
-                    }else{
-                        Calendar cal = Calendar.getInstance();
-                        cal.setTime(new Date());
-                        cal.add(Calendar.DATE, dayDifference);
-                        String datePath = yyyyMMdd.format(cal.getTime());
-                        scanningPath = baseMonitorDirPath + File.separator + datePath;
-                        candidateFiles = monitorDirUtil.getCandidateFiles(Paths.get(scanningPath));
-                    }
-                    if(!candidateFiles.isEmpty()){
-                        uploadedThreadList.get(scanningNo%uploadThreadNum).putFileListIntoDealingQueue(candidateFiles);
-                        System.out.println(yyyy_MM_ddHHmmss.format(new Date()) +" -- Put "+ candidateFiles.size() + " files of [" + scanningPath + "] into thread number" + scanningNo%uploadThreadNum);
-                        scanningNo++;
-                    }
-                    Thread.sleep(scanningFrequency);
+                List<File> candidateFiles;
+                candidateFiles = monitorDirUtil.getCandidateFiles(Paths.get(baseMonitorDirPath + File.separator + theDay));
+                if(!candidateFiles.isEmpty()){
+                    dealingQueue.put(candidateFiles);
                 }
+                Thread.sleep(scanningFrequency);
             } catch (InterruptedException e) {
                 e.printStackTrace();
             }
@@ -197,8 +167,6 @@ public class MonitorDirUpload2FtpPartitionedQueue {
         private String workingDir;
         private int ftpPort;
         private FTPClient tFtp;
-
-        public  LinkedBlockingQueue<List<File>> dealingQueue = new LinkedBlockingQueue<List<File>>(100);
 
         UploadThread( String name, String ftpHost, String ftpUserName, String ftpPassword, int ftpPort, String ftpRemotePath) throws IOException {
             this.threadName = name;
@@ -257,15 +225,12 @@ public class MonitorDirUpload2FtpPartitionedQueue {
                             String fileOriginalName = file.getName().substring(0,file.getName().lastIndexOf(".loading"));
 
                             Boolean uploadSucceed = this.uploadFile(uploadedPath, fileOriginalName,  file);
-
-
                             if(uploadSucceed){
                                 //拷贝到其他目录
                                 if(allowCopy && StringUtils.isNotBlank(copyToBasicPath)){
                                     String copyToPath = copyToBasicPath +  uploadedPath + file.getName();
                                     Files.copy(file.toPath(), new File(copyToPath).toPath());
                                 }
-
                                 String uploadedName= file.getAbsolutePath().substring(0, file.getAbsolutePath().lastIndexOf(".loading"))+ afterUploadSuffix;
                                 File loadedFile = new File(uploadedName);
                                 file.renameTo(loadedFile);
@@ -313,11 +278,6 @@ public class MonitorDirUpload2FtpPartitionedQueue {
                 e.printStackTrace();
             }
             return success;
-        }
-
-
-        public synchronized void putFileListIntoDealingQueue(List<File> candidateFilesList) throws InterruptedException {
-            this.dealingQueue.put(candidateFilesList);
         }
     }
 

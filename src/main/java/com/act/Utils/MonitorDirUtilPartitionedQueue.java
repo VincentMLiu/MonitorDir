@@ -84,9 +84,9 @@ public class MonitorDirUtilPartitionedQueue {
                     if (!fileName.endsWith(completedSuffix) && !fileName.startsWith(".") && includePattern.matcher(fileName).matches()
                             && !ignorePattern.matcher(fileName).matches()) {
 
-                        File loadingFile = new File(candidate.getFileName() + ".loading" );
-                        File orignalFile = candidate.toFile();
-                        orignalFile.renameTo(loadingFile);
+                        File originalFile = candidate.toFile();
+                        File loadingFile = new File(originalFile.getAbsolutePath() + ".loading" );
+                        originalFile.renameTo(loadingFile);
                         candidateFiles.add(loadingFile);
                     }
 
