@@ -225,7 +225,7 @@ public class MonitorDirUpload2FtpPartitionedQueue {
                 while(true){
                     List<File> oneBatch = dealingQueue.take();
                     if(oneBatch!=null && !oneBatch.isEmpty()){
-
+                        List<File> reDealingList = new ArrayList<>(oneBatch.size());
                         for(File file : oneBatch){
                             //check wether tFtp isConnected
                             while(!tFtp.isConnected()){
@@ -270,10 +270,13 @@ public class MonitorDirUpload2FtpPartitionedQueue {
                                 File loadedFile = new File(uploadedName);
                                 file.renameTo(loadedFile);
                             }else{
-                                System.out.println("Unsuccessfully dealing file [" + file.getAbsolutePath() + "], will scan it later!");
+                                System.out.println("Unsuccessfully dealing file [" + file.getAbsolutePath() + "], will reUpload it later!");
+                                reDealingList.add(file);
                             }
 
                         }
+
+                        this.putFileListIntoDealingQueue(reDealingList);
                     }else {
                         System.out.println("This batch is empty");
                     }
