@@ -36,6 +36,8 @@ public class MonitorDirUpload2FtpPartitionedQueue {
         private static String afterUploadSuffix;
         //扫描频率
         private static long scanningFrequency=10000l;
+        //是否递归子目录
+        private static boolean recursiveDirectorySearch;
         //ftpHost
         private static String ftpHost;
         //ftpUserName
@@ -75,6 +77,7 @@ public class MonitorDirUpload2FtpPartitionedQueue {
         ftpPassword = ConfigerationUtils.get("ftpPassword", "fraud@2018");
         ftpPort = Integer.parseInt(ConfigerationUtils.get("ftpPort", "21"));
         ftpRemotePath = ConfigerationUtils.get("ftpRemotePath", "/");
+        recursiveDirectorySearch = Boolean.parseBoolean(ConfigerationUtils.get("recursiveDirectorySearch", "true"));
 
 
         uploadThreadNum = Integer.parseInt(ConfigerationUtils.get("uploadThreadNum", "3"));
@@ -154,7 +157,7 @@ public class MonitorDirUpload2FtpPartitionedQueue {
                     .spoolDirectory(new File(baseMonitorDirPath))
                     .includePattern(includePattern)
                     .ignorePattern(ignorePattern)
-                    .recursiveDirectorySearch(true)
+                    .recursiveDirectorySearch(recursiveDirectorySearch)
                     .build();
 
             try {
