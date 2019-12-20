@@ -150,6 +150,7 @@ public class MonitorDirUpload2FtpHandRecovery {
                 candidateFiles = monitorDirUtil.getCandidateFiles(Paths.get(baseMonitorDirPath + File.separator + theDay));
                 if(!candidateFiles.isEmpty()){
                     dealingQueue.put(candidateFiles);
+                    System.out.println(threadName + " put " + candidateFiles.size() + " into dealingQueue");
                 }
                 Thread.sleep(scanningFrequency);
             } catch (InterruptedException e) {
@@ -244,7 +245,7 @@ public class MonitorDirUpload2FtpHandRecovery {
                     }else {
                         System.out.println("This batch is empty");
                     }
-
+                    System.out.println(threadName + " Total dealing file:" + oneBatch.size());
                     Thread.sleep(10000l);
                 }
             } catch (InterruptedException | IOException e) {

@@ -15,10 +15,7 @@ import java.io.InputStream;
 import java.nio.file.Files;
 import java.nio.file.Paths;
 import java.text.SimpleDateFormat;
-import java.util.ArrayList;
-import java.util.Calendar;
-import java.util.Date;
-import java.util.List;
+import java.util.*;
 import java.util.concurrent.LinkedBlockingQueue;
 
 public class MonitorDirUpload2FtpPartitionedQueue {
@@ -38,6 +35,9 @@ public class MonitorDirUpload2FtpPartitionedQueue {
         private static long scanningFrequency=10000l;
         //是否递归子目录
         private static boolean recursiveDirectorySearch;
+        //失败重试次数
+        private static int retryLimit;
+
         //ftpHost
         private static String ftpHost;
         //ftpUserName
@@ -78,7 +78,7 @@ public class MonitorDirUpload2FtpPartitionedQueue {
         ftpPort = Integer.parseInt(ConfigerationUtils.get("ftpPort", "21"));
         ftpRemotePath = ConfigerationUtils.get("ftpRemotePath", "/");
         recursiveDirectorySearch = Boolean.parseBoolean(ConfigerationUtils.get("recursiveDirectorySearch", "true"));
-
+        retryLimit = Integer.parseInt(ConfigerationUtils.get("retryLimit", "3"));
 
         uploadThreadNum = Integer.parseInt(ConfigerationUtils.get("uploadThreadNum", "3"));
 
@@ -183,7 +183,8 @@ public class MonitorDirUpload2FtpPartitionedQueue {
                     }
                     Thread.sleep(scanningFrequency);
                 }
-            } catch (InterruptedException e) {
+            } catch (Exception e) {
+                System.out.println("Found Exception in ScanningThread" + threadName);
                 e.printStackTrace();
             }
         }
@@ -202,6 +203,7 @@ public class MonitorDirUpload2FtpPartitionedQueue {
         private FTPClient tFtp;
 
         public  LinkedBlockingQueue<List<File>> dealingQueue = new LinkedBlockingQueue<List<File>>(100);
+        private Map<String, Integer> retryMap = new HashMap<String, Integer>();
 
         UploadThread( String name, String ftpHost, String ftpUserName, String ftpPassword, int ftpPort, String ftpRemotePath) throws IOException {
             this.threadName = name;
@@ -273,15 +275,33 @@ public class MonitorDirUpload2FtpPartitionedQueue {
                                 File loadedFile = new File(uploadedName);
                                 file.renameTo(loadedFile);
                             }else{
-                                System.out.println("Unsuccessfully dealing file [" + file.getAbsolutePath() + "], will reUpload it later!");
-                                reDealingList.add(file);
+
+                                Integer retryTimesInt = retryMap.get(file.getAbsolutePath());
+                                if(retryTimesInt !=null ){
+                                    if(retryTimesInt <= retryLimit){
+                                        System.out.println("Unsuccessfully dealing file [" + file.getAbsolutePath() + "], will reUpload it later! -- " + retryTimesInt.intValue());
+                                        reDealingList.add(file);
+                                        retryMap.put(file.getAbsolutePath(), retryTimesInt++);
+                                    }else {
+                                        retryMap.remove(file.getAbsolutePath());
+                                        System.out.println("Unsuccessfully dealing file [" + file.getAbsolutePath() + "] for "+ retryLimit + " times, it will be dropped!" );
+                                    }
+                                }else {
+                                    System.out.println("Unsuccessfully dealing file [" + file.getAbsolutePath() + "], will reUpload it later!");
+                                    retryTimesInt = 1;
+                                    retryMap.put(file.getAbsolutePath(), retryTimesInt);
+                                    reDealingList.add(file);
+                                }
+
                             }
 
                         }
 
                         this.putFileListIntoDealingQueue(reDealingList);
+                        System.out.println(threadName + " Total dealing file:" + oneBatch.size() + " Successful loaded: " + (oneBatch.size()-reDealingList.size())
+                                +" reDealingFile: " + reDealingList.size());
                     }else {
-                        System.out.println("This batch is empty");
+                        System.out.println(threadName + " get an empty batch");
                     }
 
                     Thread.sleep(10000l);
