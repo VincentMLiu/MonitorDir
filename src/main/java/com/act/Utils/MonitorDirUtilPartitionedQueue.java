@@ -1,8 +1,7 @@
 package com.act.Utils;
 
 import com.google.common.base.Preconditions;
-import org.slf4j.Logger;
-import org.slf4j.LoggerFactory;
+import org.apache.log4j.Logger;
 
 import java.io.File;
 import java.io.IOException;
@@ -14,7 +13,7 @@ import java.util.regex.Pattern;
 
 public class MonitorDirUtilPartitionedQueue {
 
-    private static final Logger logger = LoggerFactory.getLogger(MonitorDirUtilPartitionedQueue.class);
+    private static final Logger logger = Logger.getLogger(MonitorDirUtilPartitionedQueue.class);
 
     private final File spoolDirectory;
     private final String completedSuffix;
@@ -60,7 +59,7 @@ public class MonitorDirUtilPartitionedQueue {
      *            the directory to gather files from
      * @return list of files within the passed in directory
      */
-    public List<File> getCandidateFiles(final Path directory) {
+    public List<File> getCandidateFiles(Path directory) {
         Preconditions.checkNotNull(directory);
         final List<File> candidateFiles = new ArrayList<>();
         try {

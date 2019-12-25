@@ -18,12 +18,15 @@ import java.nio.file.Files;
 import java.nio.file.Paths;
 import java.text.SimpleDateFormat;
 import java.util.*;
+import java.util.concurrent.Executors;
 import java.util.concurrent.LinkedBlockingQueue;
+import java.util.concurrent.ScheduledExecutorService;
+import java.util.concurrent.TimeUnit;
 
-public class MonitorDirUpload2FtpPartitionedQueue {
+public class MonitorDirUpload2FtpPartitionedQueueScheduled {
 
 
-        static Logger logger = Logger.getLogger ( MonitorDirUpload2FtpPartitionedQueue.class.getName ());
+        static Logger logger = Logger.getLogger ( MonitorDirUpload2FtpPartitionedQueueScheduled.class.getName ());
 
     //存放待处理的文件
 //     public static LinkedBlockingQueue<List<File>> dealingQueue = new LinkedBlockingQueue<List<File>>(100);
@@ -66,13 +69,16 @@ public class MonitorDirUpload2FtpPartitionedQueue {
         private static List<UploadThread> uploadedThreadList = new ArrayList<UploadThread>();
 
 
+        private static ScheduledExecutorService scanService;
+
+        private static ScheduledExecutorService uploadService;
 
     public static void main(String[] args) throws IOException {
         //Init Configs
         //args[0] = properties fileName
         //WINDOWS: {resource dir}/monitorDir.properties
         //Linux: {jar dir}/conf/monitorDir.properties
-        PropertyConfigurator.configure("log4j.properties");
+        PropertyConfigurator.configure("../log4j.properties");
         ConfigerationUtils.init(args[0]);
 
         monitorFilePath = ConfigerationUtils.get("monitorFilePath", "/");
@@ -96,6 +102,13 @@ public class MonitorDirUpload2FtpPartitionedQueue {
         File monitorDir = new File(monitorFilePath);
         File[] pointList = monitorDir.listFiles();
 
+
+        if(StringUtils.isNotBlank(theDay)){
+            scanService = Executors.newScheduledThreadPool(pointList.length);
+        }else {
+            scanService = Executors.newScheduledThreadPool(pointList.length * 2);
+        }
+
         for(int i = 0 ; i < pointList.length ; i++){
 
             if(pointList[i].isDirectory()){
@@ -103,27 +116,34 @@ public class MonitorDirUpload2FtpPartitionedQueue {
                     theDay = args[1];
                     //scanDirs 指定天
                     ScanDirThread scanDir_td_today = new ScanDirThread(pointList[i].getAbsolutePath(), "scanDir-td-theDay[" + i + "]", theDay);
-                    scanDir_td_today.start();
+//                    scanDir_td_today.start();
+                    scanService.scheduleWithFixedDelay(scanDir_td_today, 0 , scanningFrequency , TimeUnit.SECONDS);
                 }else {
                     //scanDirs 今天
                     ScanDirThread scanDir_td_today = new ScanDirThread(pointList[i].getAbsolutePath(), "scanDir-td-today[" + i + "]", 0);
-                    scanDir_td_today.start();
+//                    scanDir_td_today.start();
+                    scanService.scheduleWithFixedDelay(scanDir_td_today, 0 , scanningFrequency , TimeUnit.SECONDS);
 
                     //scanDirs 昨天
                     ScanDirThread scanDir_td_yesterday = new ScanDirThread(pointList[i].getAbsolutePath(), "scanDir-td-yesterday[" + i + "]", -1);
-                    scanDir_td_yesterday.start();
+//                    scanDir_td_yesterday.start();
+                    scanService.scheduleWithFixedDelay(scanDir_td_yesterday, 0 , scanningFrequency , TimeUnit.SECONDS);
+
+
                 }
             }
         }
 
+        uploadService = Executors.newScheduledThreadPool(uploadThreadNum);
 
         //upload TO FTP
         for(int utn = 0; utn < uploadThreadNum; utn++){
             //有多少个线程就先创造多少个QUEUE，模仿kafka的分片，scan_thread写入，upload_thread读取。
 
             UploadThread uploadTd = new UploadThread("upload-td-num[" + utn + "]", ftpHost, ftpUserName, ftpPassword, ftpPort, ftpRemotePath);
-            uploadTd.start();
+//            uploadTd.start();
             uploadedThreadList.add(uploadTd);
+            uploadService.scheduleWithFixedDelay(uploadTd, 30 , 10 , TimeUnit.SECONDS);
         }
 
 
@@ -136,11 +156,18 @@ public class MonitorDirUpload2FtpPartitionedQueue {
         private SimpleDateFormat yyyyMMdd = new SimpleDateFormat("yyyyMMdd");
         private String baseMonitorDirPath;
         private MonitorDirUtilPartitionedQueue monitorDirUtil;
+        private long scanningNo = 0l;
 
         ScanDirThread( String baseMonitorDirPath, String name, String theDay) {
             this.dayDifference = 0;
             threadName = name + theDay;
             this.baseMonitorDirPath = baseMonitorDirPath;
+            monitorDirUtil = MonitorDirUtilPartitionedQueue.builder()
+                    .spoolDirectory(new File(baseMonitorDirPath))
+                    .includePattern(includePattern)
+                    .ignorePattern(ignorePattern)
+                    .recursiveDirectorySearch(recursiveDirectorySearch)
+                    .build();
             logger.info("Creating " +  threadName + " to monitor [" + baseMonitorDirPath + "/" + theDay + "]");
         }
 
@@ -149,17 +176,18 @@ public class MonitorDirUpload2FtpPartitionedQueue {
             this.dayDifference = dayDifference;
             threadName = name + dayDifference;
             this.baseMonitorDirPath = baseMonitorDirPath;
-            logger.info("Creating " +  threadName + " to monitor [" + baseMonitorDirPath + "]");
-        }
-
-        public void start () {
-            logger.info("Starting " +  threadName );
             monitorDirUtil = MonitorDirUtilPartitionedQueue.builder()
                     .spoolDirectory(new File(baseMonitorDirPath))
                     .includePattern(includePattern)
                     .ignorePattern(ignorePattern)
                     .recursiveDirectorySearch(recursiveDirectorySearch)
                     .build();
+            logger.info("Creating " +  threadName + " to monitor [" + baseMonitorDirPath + "]");
+        }
+
+        public void start () {
+            logger.info("Starting " +  threadName );
+
             if (t == null) {
                 t = new Thread (this, threadName);
                 t.start ();
@@ -167,30 +195,27 @@ public class MonitorDirUpload2FtpPartitionedQueue {
         }
 
         public void run() {
-
-
             try {
-                long scanningNo = 0l;
-                while(true){
-                    List<File> candidateFiles;
-                    String scanningPath;
-                    if(StringUtils.isNotBlank(theDay)){
-                        scanningPath = baseMonitorDirPath + File.separator + theDay;
-                        candidateFiles = monitorDirUtil.getCandidateFiles(Paths.get(scanningPath));
-                    }else{
-                        Calendar cal = Calendar.getInstance();
-                        cal.setTime(new Date());
-                        cal.add(Calendar.DATE, dayDifference);
-                        String datePath = yyyyMMdd.format(cal.getTime());
-                        scanningPath = baseMonitorDirPath + File.separator + datePath;
-                        candidateFiles = monitorDirUtil.getCandidateFiles(Paths.get(scanningPath));
-                    }
-                    if(!candidateFiles.isEmpty()){
-                        uploadedThreadList.get((int)scanningNo%uploadThreadNum).putFileListIntoDealingQueue(candidateFiles);
-                        logger.info(" ["+ threadName + "] -- Put "+ candidateFiles.size() + " files of [" + scanningPath + "] into thread number" + scanningNo%uploadThreadNum);
-                        scanningNo++;
-                    }
-                    Thread.sleep(scanningFrequency);
+
+                List<File> candidateFiles;
+                String scanningPath;
+                if(StringUtils.isNotBlank(theDay)){
+                    scanningPath = baseMonitorDirPath + File.separator + theDay;
+                    candidateFiles = monitorDirUtil.getCandidateFiles(Paths.get(scanningPath));
+                    logger.debug("Scanning No." + scanningNo + " -- Scanning Path: [" + scanningPath + "] get [" + candidateFiles.size() + "] files");
+                }else{
+                    Calendar cal = Calendar.getInstance();
+                    cal.setTime(new Date());
+                    cal.add(Calendar.DATE, dayDifference);
+                    String datePath = yyyyMMdd.format(cal.getTime());
+                    scanningPath = baseMonitorDirPath + File.separator + datePath;
+                    candidateFiles = monitorDirUtil.getCandidateFiles(Paths.get(scanningPath));
+                    logger.debug("Scanning No." + scanningNo + " -- Scanning Path: [" + scanningPath + "] get [" + candidateFiles.size() + "] files");
+                }
+                if(!candidateFiles.isEmpty()){
+                    uploadedThreadList.get((int)scanningNo%uploadThreadNum).putFileListIntoDealingQueue(candidateFiles);
+                    logger.info(" ["+ threadName + "] -- Put "+ candidateFiles.size() + " files of [" + scanningPath + "] into thread [" + uploadedThreadList.get((int)scanningNo%uploadThreadNum).getThreadName() + "]");
+                    scanningNo++;
                 }
             } catch (Exception e) {
                 logger.error("Found Exception in ScanningThread" + threadName);
@@ -237,85 +262,83 @@ public class MonitorDirUpload2FtpPartitionedQueue {
         @Override
         public void run() {
             try {
-                while(true){
-                    List<File> oneBatch = dealingQueue.take();
-                    if(oneBatch!=null && !oneBatch.isEmpty()){
-                        List<File> reDealingList = new ArrayList<>(oneBatch.size());
-                        for(File file : oneBatch){
-                            //check wether tFtp isConnected
-                            while(!tFtp.isConnected()){
-                                logger.warn("ftp is not connected will try to re-connect it");
-                                tFtp = FtpUtil.getThreadSafeFtpClient(ftpHost, ftpUserName, ftpPassword, ftpPort);
-                                Thread.sleep(30000l);
-                            }
-                            //GET Path
-                            ///opt/ftp_gr/records/0011/20191010/14/20191010145007.00002.44830.up.voic.pcm
+                List<File> oneBatch = dealingQueue.take();
+                if(oneBatch!=null && !oneBatch.isEmpty()){
+                    List<File> reDealingList = new ArrayList<>(oneBatch.size());
+                    for(File file : oneBatch){
+                        //check wether tFtp isConnected
+                        while(!tFtp.isConnected()){
+                            logger.warn("ftp is not connected will try to re-connect it");
+                            tFtp = FtpUtil.getThreadSafeFtpClient(ftpHost, ftpUserName, ftpPassword, ftpPort);
+                        }
+                        //GET Path
+                        ///opt/ftp_gr/records/0011/20191010/14/20191010145007.00002.44830.up.voic.pcm
 //                            String[] dirNames = file.getAbsolutePath().split(File.separator);
 //                            String hourDir = dirNames[dirNames.length - 2];
 //                            String dayDir = dirNames[dirNames.length - 3];
 //                            String pointDir = dirNames[dirNames.length - 4];
 //                            String uploadedPath = ftpRemotePath + File.separator + pointDir + File.separator + dayDir + File.separator + hourDir;
 
-                            String fileParentAbsolutePath = file.getParent();
-                            String uploadedPath = "/";
-                            //如果不是传到根目录下
-                            if(!ftpRemotePath.equals("/")){
-                                int cut = fileParentAbsolutePath.lastIndexOf(ftpRemotePath);
-                                if(cut < 0 || cut > fileParentAbsolutePath.length()){
-                                    uploadedPath = ftpRemotePath;
-                                } else {
-                                    uploadedPath = fileParentAbsolutePath.substring(fileParentAbsolutePath.lastIndexOf(ftpRemotePath));
-                                }
+                        String fileParentAbsolutePath = file.getParent();
+                        String uploadedPath = "/";
+                        //如果不是传到根目录下
+                        if(!ftpRemotePath.equals("/")){
+                            int cut = fileParentAbsolutePath.lastIndexOf(ftpRemotePath);
+                            if(cut < 0 || cut > fileParentAbsolutePath.length()){
+                                uploadedPath = ftpRemotePath;
+                            } else {
+                                uploadedPath = fileParentAbsolutePath.substring(fileParentAbsolutePath.lastIndexOf(ftpRemotePath));
+                            }
+                        }
+
+                        //upload to ftp
+                        String fileOriginalName = file.getName().substring(0,file.getName().lastIndexOf(".loading"));
+
+                        Boolean uploadSucceed = this.uploadFile(uploadedPath, fileOriginalName,  file);
+
+
+                        if(uploadSucceed){
+                            //拷贝到其他目录
+                            if(allowCopy && StringUtils.isNotBlank(copyToBasicPath)){
+                                String copyToPath = copyToBasicPath +  uploadedPath + file.getName();
+                                Files.copy(file.toPath(), new File(copyToPath).toPath());
                             }
 
-                            //upload to ftp
-                            String fileOriginalName = file.getName().substring(0,file.getName().lastIndexOf(".loading"));
+                            String uploadedName= file.getAbsolutePath().substring(0, file.getAbsolutePath().lastIndexOf(".loading"))+ afterUploadSuffix;
+                            File loadedFile = new File(uploadedName);
+                            file.renameTo(loadedFile);
+                        }else{
 
-                            Boolean uploadSucceed = this.uploadFile(uploadedPath, fileOriginalName,  file);
-
-
-                            if(uploadSucceed){
-                                //拷贝到其他目录
-                                if(allowCopy && StringUtils.isNotBlank(copyToBasicPath)){
-                                    String copyToPath = copyToBasicPath +  uploadedPath + file.getName();
-                                    Files.copy(file.toPath(), new File(copyToPath).toPath());
-                                }
-
-                                String uploadedName= file.getAbsolutePath().substring(0, file.getAbsolutePath().lastIndexOf(".loading"))+ afterUploadSuffix;
-                                File loadedFile = new File(uploadedName);
-                                file.renameTo(loadedFile);
-                            }else{
-
-                                Integer retryTimesInt = retryMap.get(file.getAbsolutePath());
-                                if(retryTimesInt !=null ){
-                                    if(retryTimesInt <= retryLimit){
-                                        logger.info("Unsuccessfully dealing file [" + file.getAbsolutePath() + "], will reUpload it later! -- " + retryTimesInt.intValue());
-                                        reDealingList.add(file);
-                                        retryMap.put(file.getAbsolutePath(), ++retryTimesInt);
-                                    }else {
-                                        retryMap.remove(file.getAbsolutePath());
-                                        logger.warn("Unsuccessfully dealing file [" + file.getAbsolutePath() + "] for "+ retryLimit + " times, it will be dropped!" );
-                                    }
-                                }else {
-                                    logger.info("Unsuccessfully dealing file [" + file.getAbsolutePath() + "], will reUpload it later!");
-                                    retryTimesInt = 1;
-                                    retryMap.put(file.getAbsolutePath(), retryTimesInt);
+                            Integer retryTimesInt = retryMap.get(file.getAbsolutePath());
+                            if(retryTimesInt !=null ){
+                                if(retryTimesInt <= retryLimit){
+                                    logger.info("Unsuccessfully dealing file [" + file.getAbsolutePath() + "], will reUpload it later! -- " + retryTimesInt.intValue());
                                     reDealingList.add(file);
+                                    retryMap.put(file.getAbsolutePath(), ++retryTimesInt);
+                                }else {
+                                    retryMap.remove(file.getAbsolutePath());
+                                    logger.warn("Unsuccessfully dealing file [" + file.getAbsolutePath() + "] for "+ retryLimit + " times, it will be dropped!" );
                                 }
-
+                            }else {
+                                logger.info("Unsuccessfully dealing file [" + file.getAbsolutePath() + "], will reUpload it later!");
+                                retryTimesInt = 1;
+                                retryMap.put(file.getAbsolutePath(), retryTimesInt);
+                                reDealingList.add(file);
                             }
 
                         }
 
-                        this.putFileListIntoDealingQueue(reDealingList);
-                        logger.info(threadName + " Total dealing file:" + oneBatch.size() + " Successful loaded: " + (oneBatch.size()-reDealingList.size())
-                                +" reDealingFile: " + reDealingList.size());
-                    }else {
-                        logger.info(threadName + " get an empty batch");
                     }
 
-                    Thread.sleep(10000l);
+                    this.putFileListIntoDealingQueue(reDealingList);
+                    logger.info(threadName + " Total dealing file:" + oneBatch.size() + " Successful loaded: " + (oneBatch.size()-reDealingList.size())
+                            +" reDealingFile: " + reDealingList.size());
+                }else {
+                    logger.info(threadName + " get an empty batch");
                 }
+
+
+
             } catch (InterruptedException | IOException e) {
                 e.printStackTrace();
             }
@@ -354,6 +377,10 @@ public class MonitorDirUpload2FtpPartitionedQueue {
 
         public synchronized void putFileListIntoDealingQueue(List<File> candidateFilesList) throws InterruptedException {
             this.dealingQueue.put(candidateFilesList);
+        }
+
+        public String getThreadName(){
+            return this.threadName;
         }
     }
 
