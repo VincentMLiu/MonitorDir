@@ -167,34 +167,33 @@ public class MonitorDirUpload2FtpPartitionedQueue {
         }
 
         public void run() {
+            long scanningNo = 0l;
+            while(true){
+                try {
+                        List<File> candidateFiles;
+                        String scanningPath;
+                        if(StringUtils.isNotBlank(theDay)){
+                            scanningPath = baseMonitorDirPath + File.separator + theDay;
+                            candidateFiles = monitorDirUtil.getCandidateFiles(Paths.get(scanningPath));
+                        }else{
+                            Calendar cal = Calendar.getInstance();
+                            cal.setTime(new Date());
+                            cal.add(Calendar.DATE, dayDifference);
+                            String datePath = yyyyMMdd.format(cal.getTime());
+                            scanningPath = baseMonitorDirPath + File.separator + datePath;
+                            candidateFiles = monitorDirUtil.getCandidateFiles(Paths.get(scanningPath));
+                        }
+                        if(!candidateFiles.isEmpty()){
+                            uploadedThreadList.get((int)scanningNo%uploadThreadNum).putFileListIntoDealingQueue(candidateFiles);
+                            logger.info(" ["+ threadName + "] -- Put "+ candidateFiles.size() + " files of [" + scanningPath + "] into thread number" + scanningNo%uploadThreadNum);
+                            scanningNo++;
+                        }
+                        Thread.sleep(scanningFrequency);
 
-
-            try {
-                long scanningNo = 0l;
-                while(true){
-                    List<File> candidateFiles;
-                    String scanningPath;
-                    if(StringUtils.isNotBlank(theDay)){
-                        scanningPath = baseMonitorDirPath + File.separator + theDay;
-                        candidateFiles = monitorDirUtil.getCandidateFiles(Paths.get(scanningPath));
-                    }else{
-                        Calendar cal = Calendar.getInstance();
-                        cal.setTime(new Date());
-                        cal.add(Calendar.DATE, dayDifference);
-                        String datePath = yyyyMMdd.format(cal.getTime());
-                        scanningPath = baseMonitorDirPath + File.separator + datePath;
-                        candidateFiles = monitorDirUtil.getCandidateFiles(Paths.get(scanningPath));
-                    }
-                    if(!candidateFiles.isEmpty()){
-                        uploadedThreadList.get((int)scanningNo%uploadThreadNum).putFileListIntoDealingQueue(candidateFiles);
-                        logger.info(" ["+ threadName + "] -- Put "+ candidateFiles.size() + " files of [" + scanningPath + "] into thread number" + scanningNo%uploadThreadNum);
-                        scanningNo++;
-                    }
-                    Thread.sleep(scanningFrequency);
+                } catch (Exception e) {
+                    logger.error("Found Exception in ScanningThread" + threadName);
+                    e.printStackTrace();
                 }
-            } catch (Exception e) {
-                logger.error("Found Exception in ScanningThread" + threadName);
-                e.printStackTrace();
             }
         }
     }
@@ -236,8 +235,8 @@ public class MonitorDirUpload2FtpPartitionedQueue {
         }
         @Override
         public void run() {
-            try {
-                while(true){
+            while(true){
+                try {
                     List<File> oneBatch = dealingQueue.take();
                     if(oneBatch!=null && !oneBatch.isEmpty()){
                         List<File> reDealingList = new ArrayList<>(oneBatch.size());
@@ -315,9 +314,10 @@ public class MonitorDirUpload2FtpPartitionedQueue {
                     }
 
                     Thread.sleep(10000l);
+
+                } catch (InterruptedException | IOException e) {
+                    e.printStackTrace();
                 }
-            } catch (InterruptedException | IOException e) {
-                e.printStackTrace();
             }
         }
 
