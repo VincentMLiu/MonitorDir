@@ -7,6 +7,8 @@ import org.apache.commons.lang.StringUtils;
 import org.apache.commons.net.ftp.FTP;
 import org.apache.commons.net.ftp.FTPClient;
 import org.apache.commons.net.ftp.FTPReply;
+import org.apache.log4j.Logger;
+import org.apache.log4j.PropertyConfigurator;
 
 import java.io.File;
 import java.io.FileInputStream;
@@ -21,6 +23,8 @@ import java.util.List;
 import java.util.concurrent.LinkedBlockingQueue;
 
 public class MonitorHuiZhiDirUpload2Ftp {
+
+    static Logger logger = Logger.getLogger ( MonitorHuiZhiDirUpload2Ftp.class.getName ());
 
     //存放待处理的文件
      public static LinkedBlockingQueue<List<File>> dealingQueue = new LinkedBlockingQueue<List<File>>(100);
@@ -60,6 +64,7 @@ public class MonitorHuiZhiDirUpload2Ftp {
         //args[0] = properties fileName
         //WINDOWS: {resource dir}/monitorDir.properties
         //Linux: {jar dir}/conf/monitorDir.properties
+        PropertyConfigurator.configure("log4j.properties");
         ConfigerationUtils.init(args[0]);
 
         monitorFilePath = ConfigerationUtils.get("monitorFilePath", "/");
@@ -99,17 +104,24 @@ public class MonitorHuiZhiDirUpload2Ftp {
         private Thread t;
         private String threadName;
         private String baseMonitorDirPath;
+        private MonitorDirUtil monitorDirUtil;
 
         ScanDirThread( String baseMonitorDirPath, String name) {
             this.baseMonitorDirPath = baseMonitorDirPath;
             this.threadName = name;
-            System.out.println("Creating " +  threadName + " to monitor [" + baseMonitorDirPath + "]");
+            monitorDirUtil = MonitorDirUtil.builder()
+                    .spoolDirectory(new File(baseMonitorDirPath))
+                    .includePattern(includePattern)
+                    .ignorePattern(ignorePattern)
+                    .recursiveDirectorySearch(recursiveDirectorySearch)
+                    .build();
+            logger.info("Creating " +  threadName + " to monitor [" + baseMonitorDirPath + "]");
         }
 
 
 
         public void start () {
-            System.out.println("Starting " +  threadName );
+            logger.info("Starting " +  threadName );
             if (t == null) {
                 t = new Thread (this, threadName);
                 t.start ();
@@ -117,24 +129,23 @@ public class MonitorHuiZhiDirUpload2Ftp {
         }
 
         public void run() {
-            MonitorDirUtil monitorDirUtil = MonitorDirUtil.builder()
-                    .spoolDirectory(new File(baseMonitorDirPath))
-                    .includePattern(includePattern)
-                    .ignorePattern(ignorePattern)
-                    .recursiveDirectorySearch(recursiveDirectorySearch)
-                    .build();
 
-            try {
-                while(true){
-                    List<File> candidateFiles;
-                    candidateFiles = monitorDirUtil.getCandidateFiles(Paths.get(baseMonitorDirPath));
-                    if(!candidateFiles.isEmpty()){
-                        dealingQueue.put(candidateFiles);
-                    }
-                    Thread.sleep(scanningFrequency);
+            while(true){
+                try {
+
+                        List<File> candidateFiles;
+                        candidateFiles = monitorDirUtil.getCandidateFiles(Paths.get(baseMonitorDirPath));
+                        if(!candidateFiles.isEmpty()){
+                            dealingQueue.put(candidateFiles);
+                            logger.info("Put " + candidateFiles.size() + "into dealingQueue Now has "  + dealingQueue.size()
+                                    + " batches are waitting to deal");
+                        }
+                        Thread.sleep(scanningFrequency);
+
+                } catch (InterruptedException e) {
+                    e.printStackTrace();
+                    logger.error(e.getMessage());
                 }
-            } catch (InterruptedException e) {
-                e.printStackTrace();
             }
         }
     }
@@ -158,13 +169,13 @@ public class MonitorHuiZhiDirUpload2Ftp {
             this.ftpPassword = ftpPassword;
             this.ftpRemotePath = ftpRemotePath;
             this.ftpPort = ftpPort;
-            System.out.println("Creating " +  threadName );
+            logger.info("Creating " +  threadName );
             this.tFtp = FtpUtil.getThreadSafeFtpClient(ftpHost, ftpUserName, ftpPassword, ftpPort);
             this.workingDir = tFtp.printWorkingDirectory();
         }
 
         public void start () {
-            System.out.println("Starting " +  threadName );
+            logger.info("Starting " +  threadName );
             if (t == null) {
                 t = new Thread (this, threadName);
                 t.start ();
@@ -172,25 +183,28 @@ public class MonitorHuiZhiDirUpload2Ftp {
         }
         @Override
         public void run() {
-            try {
-                while(true){
+            while(true){
+                try {
                     List<File> oneBatch = dealingQueue.take();
                     if(oneBatch!=null && !oneBatch.isEmpty()){
+
+                        int successCount = 0;
+                        int failCount = 0;
 
                         for(File file : oneBatch){
                             //check wether tFtp isConnected
                             while(!tFtp.isConnected()){
-                                System.out.println("");
+                                logger.warn("ftp server is not connected, try to reconnect it now!!");
                                 tFtp = FtpUtil.getThreadSafeFtpClient(ftpHost, ftpUserName, ftpPassword, ftpPort);
                                 Thread.sleep(30000l);
                             }
                             //GET Path
                             ///opt/ftp_gr/records/0011/20191010/14/20191010145007.00002.44830.up.voic.pcm
-//                            String[] dirNames = file.getAbsolutePath().split(File.separator);
-//                            String hourDir = dirNames[dirNames.length - 2];
-//                            String dayDir = dirNames[dirNames.length - 3];
-//                            String pointDir = dirNames[dirNames.length - 4];
-//                            String uploadedPath = ftpRemotePath + File.separator + pointDir + File.separator + dayDir + File.separator + hourDir;
+    //                            String[] dirNames = file.getAbsolutePath().split(File.separator);
+    //                            String hourDir = dirNames[dirNames.length - 2];
+    //                            String dayDir = dirNames[dirNames.length - 3];
+    //                            String pointDir = dirNames[dirNames.length - 4];
+    //                            String uploadedPath = ftpRemotePath + File.separator + pointDir + File.separator + dayDir + File.separator + hourDir;
 
                             String fileParentAbsolutePath = file.getParent();
                             String uploadedPath = "/";
@@ -214,19 +228,26 @@ public class MonitorHuiZhiDirUpload2Ftp {
                                 }
                                 File loadedFile = new File(file.getAbsolutePath() + afterUploadSuffix );
                                 file.renameTo(loadedFile);
+                                successCount++;
                             }else{
-                                System.out.println("Unsuccessfully dealing file [" + file.getAbsolutePath() + "], will scan it later!");
+                                logger.warn("Unsuccessfully dealing file [" + file.getAbsolutePath() + "], will scan it later!");
+                                failCount++;
                             }
-
                         }
+
+                        logger.info(threadName + " Total dealing file:" + oneBatch.size() + " Successful loaded: " + successCount
+                                +" reDealingFile: " + failCount);
+
                     }else {
-                        System.out.println("This batch is empty");
+                        logger.info("This batch is empty");
                     }
 
-                    Thread.sleep(10000l);
+                        Thread.sleep(10000l);
+
+                } catch (InterruptedException | IOException e) {
+                    e.printStackTrace();
+                    logger.error(e.getMessage());
                 }
-            } catch (InterruptedException | IOException e) {
-                e.printStackTrace();
             }
         }
 
@@ -248,7 +269,7 @@ public class MonitorHuiZhiDirUpload2Ftp {
                 tFtp.setControlEncoding("UTF-8");
                 success = tFtp.changeWorkingDirectory(workingDir + path);
                 if(!success){
-                    System.out.println("ChangeWorkingDirectory [" + workingDir + path + "] = " + success);
+                    logger.warn("ChangeWorkingDirectory [" + workingDir + path + "] = " + success);
                     return success;
                 }
                 success = tFtp.storeFile(filename, input);
@@ -256,6 +277,7 @@ public class MonitorHuiZhiDirUpload2Ftp {
 
             } catch (IOException e) {
                 e.printStackTrace();
+                logger.error(e.getMessage());
             }
             return success;
         }
