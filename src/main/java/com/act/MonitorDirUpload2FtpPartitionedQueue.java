@@ -2,6 +2,7 @@ package com.act;
 
 import com.act.Utils.ConfigerationUtils;
 import com.act.Utils.FtpUtil;
+import com.act.Utils.JarToolUtil;
 import com.act.Utils.MonitorDirUtilPartitionedQueue;
 import org.apache.commons.lang.StringUtils;
 import org.apache.commons.net.ftp.FTP;
@@ -72,7 +73,8 @@ public class MonitorDirUpload2FtpPartitionedQueue {
         //args[0] = properties fileName
         //WINDOWS: {resource dir}/monitorDir.properties
         //Linux: {jar dir}/conf/monitorDir.properties
-        PropertyConfigurator.configure("log4j.properties");
+        System.setProperty("logdir", JarToolUtil.getJarDir() + File.separator + "logs");
+        PropertyConfigurator.configure( JarToolUtil.getJarDir() + File.separator + "conf" + File.separator +"log4j.properties");
         ConfigerationUtils.init(args[0]);
 
         monitorFilePath = ConfigerationUtils.get("monitorFilePath", "/");

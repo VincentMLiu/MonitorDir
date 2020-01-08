@@ -22,8 +22,7 @@ import java.util.concurrent.LinkedBlockingQueue;
 
 public class MonitorDirUpload2FtpHandRecovery {
 
-    //存放待处理的文件
-     public static LinkedBlockingQueue<List<File>> dealingQueue = new LinkedBlockingQueue<List<File>>(100);
+
 
         //监控基础目录
         private static String monitorFilePath;
@@ -89,20 +88,21 @@ public class MonitorDirUpload2FtpHandRecovery {
             if(pointList[i].isDirectory()){
                 theDay = args[1];
                 //scanDirs 指定天
-                ScanDirThread scanDir_td_today = new ScanDirThread(pointList[i].getAbsolutePath(), "scanDir-td-theDay[" + i + "]", theDay);
+                UploadThread uploadTd = new UploadThread("upload-td-num[" + pointList[i].getAbsolutePath() + "]", ftpHost, ftpUserName, ftpPassword, ftpPort, ftpRemotePath);
+                ScanDirThread scanDir_td_today = new ScanDirThread(pointList[i].getAbsolutePath(), "scanDir-td-theDay[" + pointList[i].getAbsolutePath() + "]", theDay, uploadTd);
                 scanDir_td_today.start();
             }
         }
 
 
-        //upload TO FTP
-        for(int utn = 0; utn < uploadThreadNum; utn++){
-            //有多少个线程就先创造多少个QUEUE，模仿kafka的分片，scan_thread写入，upload_thread读取。
-
-
-            UploadThread uploadTd = new UploadThread("upload-td-num[" + utn + "]", ftpHost, ftpUserName, ftpPassword, ftpPort, ftpRemotePath);
-            uploadTd.start();
-        }
+//        //upload TO FTP
+//        for(int utn = 0; utn < uploadThreadNum; utn++){
+//            //有多少个线程就先创造多少个QUEUE，模仿kafka的分片，scan_thread写入，upload_thread读取。
+//
+//
+//            UploadThread uploadTd = new UploadThread("upload-td-num[" + utn + "]", ftpHost, ftpUserName, ftpPassword, ftpPort, ftpRemotePath);
+//            uploadTd.start();
+//        }
 
 
     }
@@ -113,11 +113,13 @@ public class MonitorDirUpload2FtpHandRecovery {
         private int dayDifference;
         private SimpleDateFormat yyyyMMdd = new SimpleDateFormat("yyyyMMdd");
         private String baseMonitorDirPath;
+        private UploadThread uploadTd;
 
-        ScanDirThread( String baseMonitorDirPath, String name, String theDay) {
+        ScanDirThread( String baseMonitorDirPath, String name, String theDay, UploadThread uploadTd) {
             this.dayDifference = 0;
             threadName = name + theDay;
             this.baseMonitorDirPath = baseMonitorDirPath;
+            this.uploadTd = uploadTd;
             System.out.println("Creating " +  threadName + " to monitor [" + baseMonitorDirPath + "/" + theDay + "]");
         }
 
@@ -149,8 +151,9 @@ public class MonitorDirUpload2FtpHandRecovery {
                 List<File> candidateFiles;
                 candidateFiles = monitorDirUtil.getCandidateFiles(Paths.get(baseMonitorDirPath + File.separator + theDay));
                 if(!candidateFiles.isEmpty()){
-                    dealingQueue.put(candidateFiles);
+                    uploadTd.putFileListIntoDealingQueue(candidateFiles);
                     System.out.println(threadName + " put " + candidateFiles.size() + " into dealingQueue");
+                    uploadTd.start();
                 }
                 Thread.sleep(scanningFrequency);
             } catch (InterruptedException e) {
@@ -170,6 +173,9 @@ public class MonitorDirUpload2FtpHandRecovery {
         private String workingDir;
         private int ftpPort;
         private FTPClient tFtp;
+
+        //存放待处理的文件
+        public LinkedBlockingQueue<List<File>> dealingQueue = new LinkedBlockingQueue<List<File>>(100);
 
         UploadThread( String name, String ftpHost, String ftpUserName, String ftpPassword, int ftpPort, String ftpRemotePath) throws IOException {
             this.threadName = name;
@@ -193,61 +199,58 @@ public class MonitorDirUpload2FtpHandRecovery {
         @Override
         public void run() {
             try {
-                while(true){
-                    List<File> oneBatch = dealingQueue.take();
-                    if(oneBatch!=null && !oneBatch.isEmpty()){
+                List<File> oneBatch = dealingQueue.take();
+                if(oneBatch!=null && !oneBatch.isEmpty()){
 
-                        for(File file : oneBatch){
-                            //check wether tFtp isConnected
-                            while(!tFtp.isConnected()){
-                                System.out.println("");
-                                tFtp = FtpUtil.getThreadSafeFtpClient(ftpHost, ftpUserName, ftpPassword, ftpPort);
-                                Thread.sleep(30000l);
-                            }
-                            //GET Path
-                            ///opt/ftp_gr/records/0011/20191010/14/20191010145007.00002.44830.up.voic.pcm
+                    for(File file : oneBatch){
+                        //check wether tFtp isConnected
+                        while(!tFtp.isConnected()){
+                            System.out.println("");
+                            tFtp = FtpUtil.getThreadSafeFtpClient(ftpHost, ftpUserName, ftpPassword, ftpPort);
+                            Thread.sleep(30000l);
+                        }
+                        //GET Path
+                        ///opt/ftp_gr/records/0011/20191010/14/20191010145007.00002.44830.up.voic.pcm
 //                            String[] dirNames = file.getAbsolutePath().split(File.separator);
 //                            String hourDir = dirNames[dirNames.length - 2];
 //                            String dayDir = dirNames[dirNames.length - 3];
 //                            String pointDir = dirNames[dirNames.length - 4];
 //                            String uploadedPath = ftpRemotePath + File.separator + pointDir + File.separator + dayDir + File.separator + hourDir;
 
-                            String fileParentAbsolutePath = file.getParent();
-                            String uploadedPath = "/";
-                            //如果不是传到根目录下
-                            if(!ftpRemotePath.equals("/")){
-                                int cut = fileParentAbsolutePath.lastIndexOf(ftpRemotePath);
-                                if(cut < 0 || cut > fileParentAbsolutePath.length()){
-                                    uploadedPath = ftpRemotePath;
-                                } else {
-                                    uploadedPath = fileParentAbsolutePath.substring(fileParentAbsolutePath.lastIndexOf(ftpRemotePath));
-                                }
+                        String fileParentAbsolutePath = file.getParent();
+                        String uploadedPath = "/";
+                        //如果不是传到根目录下
+                        if(!ftpRemotePath.equals("/")){
+                            int cut = fileParentAbsolutePath.lastIndexOf(ftpRemotePath);
+                            if(cut < 0 || cut > fileParentAbsolutePath.length()){
+                                uploadedPath = ftpRemotePath;
+                            } else {
+                                uploadedPath = fileParentAbsolutePath.substring(fileParentAbsolutePath.lastIndexOf(ftpRemotePath));
                             }
-
-                            //upload to ftp
-                            String fileOriginalName = file.getName().substring(0,file.getName().lastIndexOf(".loading"));
-
-                            Boolean uploadSucceed = this.uploadFile(uploadedPath, fileOriginalName,  file);
-                            if(uploadSucceed){
-                                //拷贝到其他目录
-                                if(allowCopy && StringUtils.isNotBlank(copyToBasicPath)){
-                                    String copyToPath = copyToBasicPath +  uploadedPath + file.getName();
-                                    Files.copy(file.toPath(), new File(copyToPath).toPath());
-                                }
-                                String uploadedName= file.getAbsolutePath().substring(0, file.getAbsolutePath().lastIndexOf(".loading"))+ afterUploadSuffix;
-                                File loadedFile = new File(uploadedName);
-                                file.renameTo(loadedFile);
-                            }else{
-                                System.out.println("Unsuccessfully dealing file [" + file.getAbsolutePath() + "], will scan it later!");
-                            }
-
                         }
-                    }else {
-                        System.out.println("This batch is empty");
+
+                        //upload to ftp
+                        String fileOriginalName = file.getName().substring(0,file.getName().lastIndexOf(".loading"));
+
+                        Boolean uploadSucceed = this.uploadFile(uploadedPath, fileOriginalName,  file);
+                        if(uploadSucceed){
+                            //拷贝到其他目录
+                            if(allowCopy && StringUtils.isNotBlank(copyToBasicPath)){
+                                String copyToPath = copyToBasicPath +  uploadedPath + file.getName();
+                                Files.copy(file.toPath(), new File(copyToPath).toPath());
+                            }
+                            String uploadedName= file.getAbsolutePath().substring(0, file.getAbsolutePath().lastIndexOf(".loading"))+ afterUploadSuffix;
+                            File loadedFile = new File(uploadedName);
+                            file.renameTo(loadedFile);
+                        }else{
+                            System.out.println("Unsuccessfully dealing file [" + file.getAbsolutePath() + "], will scan it later!");
+                        }
+
                     }
-                    System.out.println(threadName + " Total dealing file:" + oneBatch.size());
-                    Thread.sleep(10000l);
+                }else {
+                    System.out.println("This batch is empty");
                 }
+                System.out.println(threadName + " Total dealing file:" + oneBatch.size());
             } catch (InterruptedException | IOException e) {
                 e.printStackTrace();
             }
@@ -282,6 +285,13 @@ public class MonitorDirUpload2FtpHandRecovery {
             }
             return success;
         }
+
+        public synchronized void putFileListIntoDealingQueue(List<File> candidateFilesList) throws InterruptedException {
+            this.dealingQueue.put(candidateFilesList);
+        }
+
     }
+
+
 
 }

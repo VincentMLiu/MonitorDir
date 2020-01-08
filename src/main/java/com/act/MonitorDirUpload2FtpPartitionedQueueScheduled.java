@@ -2,6 +2,7 @@ package com.act;
 
 import com.act.Utils.ConfigerationUtils;
 import com.act.Utils.FtpUtil;
+import com.act.Utils.JarToolUtil;
 import com.act.Utils.MonitorDirUtilPartitionedQueue;
 import org.apache.commons.lang.StringUtils;
 import org.apache.commons.net.ftp.FTP;
@@ -73,12 +74,17 @@ public class MonitorDirUpload2FtpPartitionedQueueScheduled {
 
         private static ScheduledExecutorService uploadService;
 
+
     public static void main(String[] args) throws IOException {
         //Init Configs
         //args[0] = properties fileName
         //WINDOWS: {resource dir}/monitorDir.properties
         //Linux: {jar dir}/conf/monitorDir.properties
-        PropertyConfigurator.configure("../log4j.properties");
+        System.setProperty("logdir", JarToolUtil.getJarDir() + File.separator + "logs");
+        PropertyConfigurator.configure( JarToolUtil.getJarDir() + File.separator + "conf" + File.separator +"log4j.properties");
+
+        logger.info("logdir = [" + System.getProperty("logdir") + "]");
+
         ConfigerationUtils.init(args[0]);
 
         monitorFilePath = ConfigerationUtils.get("monitorFilePath", "/");
@@ -101,13 +107,31 @@ public class MonitorDirUpload2FtpPartitionedQueueScheduled {
 
         File monitorDir = new File(monitorFilePath);
         File[] pointList = monitorDir.listFiles();
-
+        logger.info("CONFIG {monitorFilePath}:" +  monitorFilePath);
+        logger.info("CONFIG {includePattern}:" +  includePattern);
+        logger.info("CONFIG {ignorePattern}:" +  ignorePattern);
+        logger.info("CONFIG {afterUploadSuffix}:" +  afterUploadSuffix);
+        logger.info("CONFIG {scanningFrequency}:" +  scanningFrequency);
+        logger.info("CONFIG {ftpHost}:" +  ftpHost);
+        logger.info("CONFIG {ftpUserName}:" +  ftpUserName);
+        logger.info("CONFIG {ftpPassword}:" +  ftpPassword);
+        logger.info("CONFIG {ftpPort}:" +  ftpPort);
+        logger.info("CONFIG {ftpRemotePath}:" +  ftpRemotePath);
+        logger.info("CONFIG {recursiveDirectorySearch}:" +  recursiveDirectorySearch);
+        logger.info("CONFIG {retryLimit}:" +  retryLimit);
+        logger.info("CONFIG {allowCopy}:" +  allowCopy);
+        logger.info("CONFIG {copyToBasicPath}:" +  copyToBasicPath);
 
         if(StringUtils.isNotBlank(theDay)){
             scanService = Executors.newScheduledThreadPool(pointList.length);
+            uploadService = Executors.newScheduledThreadPool(pointList.length);
+            logger.info("CONFIG {uploadThreadNum}:" +  pointList.length);
         }else {
             scanService = Executors.newScheduledThreadPool(pointList.length * 2);
+            uploadService = Executors.newScheduledThreadPool(pointList.length * 2);
+            logger.info("CONFIG {uploadThreadNum}:" +  pointList.length * 2);
         }
+
 
         for(int i = 0 ; i < pointList.length ; i++){
 
@@ -115,36 +139,39 @@ public class MonitorDirUpload2FtpPartitionedQueueScheduled {
                 if(args.length > 1){
                     theDay = args[1];
                     //scanDirs 指定天
-                    ScanDirThread scanDir_td_today = new ScanDirThread(pointList[i].getAbsolutePath(), "scanDir-td-theDay[" + i + "]", theDay);
+                    UploadThread uploadTd = new UploadThread("upload-td-num[" + i + "]", ftpHost, ftpUserName, ftpPassword, ftpPort, ftpRemotePath);
+
+                    ScanDirThread scanDir_td_today = new ScanDirThread(pointList[i].getAbsolutePath(), "scanDir-td-theDay[" + i + "]", theDay, uploadTd);
 //                    scanDir_td_today.start();
-                    scanService.scheduleWithFixedDelay(scanDir_td_today, 0 , scanningFrequency , TimeUnit.SECONDS);
+                    scanService.scheduleWithFixedDelay(scanDir_td_today, 0 , scanningFrequency , TimeUnit.MILLISECONDS);
+                    uploadService.scheduleWithFixedDelay(uploadTd, 30 , 10 , TimeUnit.SECONDS);
                 }else {
+                    UploadThread uploadTd = new UploadThread("upload-td-[" + i + "]", ftpHost, ftpUserName, ftpPassword, ftpPort, ftpRemotePath);
                     //scanDirs 今天
-                    ScanDirThread scanDir_td_today = new ScanDirThread(pointList[i].getAbsolutePath(), "scanDir-td-today[" + i + "]", 0);
+                    ScanDirThread scanDir_td_today = new ScanDirThread(pointList[i].getAbsolutePath(), "scanDir-td-today[" + i + "]", 0, uploadTd);
 //                    scanDir_td_today.start();
-                    scanService.scheduleWithFixedDelay(scanDir_td_today, 0 , scanningFrequency , TimeUnit.SECONDS);
+                    scanService.scheduleWithFixedDelay(scanDir_td_today, 0 , scanningFrequency , TimeUnit.MILLISECONDS);
 
                     //scanDirs 昨天
-                    ScanDirThread scanDir_td_yesterday = new ScanDirThread(pointList[i].getAbsolutePath(), "scanDir-td-yesterday[" + i + "]", -1);
+                    ScanDirThread scanDir_td_yesterday = new ScanDirThread(pointList[i].getAbsolutePath(), "scanDir-td-yesterday[" + i + "]", -1, uploadTd);
 //                    scanDir_td_yesterday.start();
-                    scanService.scheduleWithFixedDelay(scanDir_td_yesterday, 0 , scanningFrequency , TimeUnit.SECONDS);
-
-
+                    scanService.scheduleWithFixedDelay(scanDir_td_yesterday, 0 , scanningFrequency , TimeUnit.MILLISECONDS);
+                    uploadService.scheduleWithFixedDelay(uploadTd, 30 , 10 , TimeUnit.SECONDS);
                 }
             }
         }
 
-        uploadService = Executors.newScheduledThreadPool(uploadThreadNum);
 
-        //upload TO FTP
-        for(int utn = 0; utn < uploadThreadNum; utn++){
-            //有多少个线程就先创造多少个QUEUE，模仿kafka的分片，scan_thread写入，upload_thread读取。
 
-            UploadThread uploadTd = new UploadThread("upload-td-num[" + utn + "]", ftpHost, ftpUserName, ftpPassword, ftpPort, ftpRemotePath);
-//            uploadTd.start();
-            uploadedThreadList.add(uploadTd);
-            uploadService.scheduleWithFixedDelay(uploadTd, 30 , 10 , TimeUnit.SECONDS);
-        }
+//        //upload TO FTP
+//        for(int utn = 0; utn < uploadThreadNum; utn++){
+//            //有多少个线程就先创造多少个QUEUE，模仿kafka的分片，scan_thread写入，upload_thread读取。
+//
+//            UploadThread uploadTd = new UploadThread("upload-td-num[" + utn + "]", ftpHost, ftpUserName, ftpPassword, ftpPort, ftpRemotePath);
+////            uploadTd.start();
+//            uploadedThreadList.add(uploadTd);
+//            uploadService.scheduleWithFixedDelay(uploadTd, 30 , 10 , TimeUnit.SECONDS);
+//        }
 
 
     }
@@ -158,10 +185,14 @@ public class MonitorDirUpload2FtpPartitionedQueueScheduled {
         private MonitorDirUtilPartitionedQueue monitorDirUtil;
         private long scanningNo = 0l;
 
-        ScanDirThread( String baseMonitorDirPath, String name, String theDay) {
+        private UploadThread uploadThread;
+
+
+        ScanDirThread( String baseMonitorDirPath, String name, String theDay, UploadThread uploadThread) {
             this.dayDifference = 0;
             threadName = name + theDay;
             this.baseMonitorDirPath = baseMonitorDirPath;
+            this.uploadThread = uploadThread;
             monitorDirUtil = MonitorDirUtilPartitionedQueue.builder()
                     .spoolDirectory(new File(baseMonitorDirPath))
                     .includePattern(includePattern)
@@ -172,10 +203,11 @@ public class MonitorDirUpload2FtpPartitionedQueueScheduled {
         }
 
 
-        ScanDirThread( String baseMonitorDirPath, String name, int dayDifference) {
+        ScanDirThread( String baseMonitorDirPath, String name, int dayDifference, UploadThread uploadThread) {
             this.dayDifference = dayDifference;
             threadName = name + dayDifference;
             this.baseMonitorDirPath = baseMonitorDirPath;
+            this.uploadThread = uploadThread;
             monitorDirUtil = MonitorDirUtilPartitionedQueue.builder()
                     .spoolDirectory(new File(baseMonitorDirPath))
                     .includePattern(includePattern)
@@ -213,8 +245,8 @@ public class MonitorDirUpload2FtpPartitionedQueueScheduled {
                     logger.debug("Scanning No." + scanningNo + " -- Scanning Path: [" + scanningPath + "] get [" + candidateFiles.size() + "] files");
                 }
                 if(!candidateFiles.isEmpty()){
-                    uploadedThreadList.get((int)scanningNo%uploadThreadNum).putFileListIntoDealingQueue(candidateFiles);
-                    logger.info(" ["+ threadName + "] -- Put "+ candidateFiles.size() + " files of [" + scanningPath + "] into thread [" + uploadedThreadList.get((int)scanningNo%uploadThreadNum).getThreadName() + "]");
+                    uploadThread.putFileListIntoDealingQueue(candidateFiles);
+                    logger.info(" Put "+ candidateFiles.size() + " files of [" + scanningPath + "] into thread [" + uploadThread.getThreadName() + "]");
                     scanningNo++;
                 }
             } catch (Exception e) {
@@ -369,6 +401,7 @@ public class MonitorDirUpload2FtpPartitionedQueueScheduled {
                 input.close();
 
             } catch (IOException e) {
+                logger.error(e.getMessage());
                 e.printStackTrace();
             }
             return success;

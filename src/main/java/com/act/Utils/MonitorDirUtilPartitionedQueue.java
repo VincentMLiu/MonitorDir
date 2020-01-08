@@ -61,7 +61,7 @@ public class MonitorDirUtilPartitionedQueue {
      */
     public List<File> getCandidateFiles(Path directory) {
         Preconditions.checkNotNull(directory);
-        final List<File> candidateFiles = new ArrayList<>();
+        List<File> candidateFiles = new ArrayList<>();
         try {
             Files.walkFileTree(directory, new SimpleFileVisitor<Path>() {
                 @Override
