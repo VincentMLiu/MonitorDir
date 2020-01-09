@@ -13,7 +13,7 @@ echo "[`date '+%Y-%m-%d %H:%M:%S'`] loadingCount = ["${loadingCount}"]" >> /home
 if [ ${loadingCount} -ge "3000" ] || [ ${pcmCount} -ge "3000" ]
 then
  echo "[`date '+%Y-%m-%d %H:%M:%S'`] loadingCount=${loadingCount} or pcmCount=${pcmCount} are reaching the Threshold(5000). Starting the re-start motion..." >> /home/monitorFtp/monitor/re-boot-monitor.log
- monitorPid=`jps -lm|grep MonitorDirUpload2FtpPartitionedQueue|awk '{print $1}'`
+ monitorPid=`jps -lm|grep MonitorDirUpload2FtpPartitionedQueueScheduled|awk '{print $1}'`
  echo "[`date '+%Y-%m-%d %H:%M:%S'`] monitor pid is "${monitorPid} >> /home/monitorFtp/monitor/re-boot-monitor.log
 
  kill -15 ${monitorPid}
@@ -27,7 +27,7 @@ then
  sh /home/monitorFtp/startMonitorDirPartitioned
  echo "[`date '+%Y-%m-%d %H:%M:%S'`] restart startMonitorDirPartitioned.sh" >> /home/monitorFtp/monitor/re-boot-monitor.log
 
- newPid=`jps -lm|grep MonitorDirUpload2FtpPartitionedQueue|awk '{print $1}'`
+ newPid=`jps -lm|grep MonitorDirUpload2FtpPartitionedQueueScheduled|awk '{print $1}'`
  echo "[`date '+%Y-%m-%d %H:%M:%S'`] new pid is ${newPid} "  >> /home/monitorFtp/monitor/re-boot-monitor.log
 else
  echo "[`date '+%Y-%m-%d %H:%M:%S'`] no problem" >> /home/monitorFtp/monitor/monitor-monitor.log
