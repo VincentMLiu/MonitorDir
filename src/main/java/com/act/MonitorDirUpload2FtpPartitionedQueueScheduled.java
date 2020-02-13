@@ -139,21 +139,21 @@ public class MonitorDirUpload2FtpPartitionedQueueScheduled {
                 if(args.length > 1){
                     theDay = args[1];
                     //scanDirs 指定天
-                    UploadThread uploadTd = new UploadThread("upload-td-num[" + i + "]", ftpHost, ftpUserName, ftpPassword, ftpPort, ftpRemotePath);
+                    UploadThread uploadTd = new UploadThread("upload-td-num[" + pointList[i].getName() + "]", ftpHost, ftpUserName, ftpPassword, ftpPort, ftpRemotePath);
 
-                    ScanDirThread scanDir_td_today = new ScanDirThread(pointList[i].getAbsolutePath(), "scanDir-td-theDay[" + i + "]", theDay, uploadTd);
+                    ScanDirThread scanDir_td_today = new ScanDirThread(pointList[i].getAbsolutePath(), "scanDir-td-theDay[" + pointList[i].getName() + "]", theDay, uploadTd);
 //                    scanDir_td_today.start();
                     scanService.scheduleWithFixedDelay(scanDir_td_today, 0 , scanningFrequency , TimeUnit.MILLISECONDS);
                     uploadService.scheduleWithFixedDelay(uploadTd, 30 , 10 , TimeUnit.SECONDS);
                 }else {
-                    UploadThread uploadTd = new UploadThread("upload-td-[" + i + "]", ftpHost, ftpUserName, ftpPassword, ftpPort, ftpRemotePath);
+                    UploadThread uploadTd = new UploadThread("upload-td-[" + pointList[i].getName() + "]", ftpHost, ftpUserName, ftpPassword, ftpPort, ftpRemotePath);
                     //scanDirs 今天
-                    ScanDirThread scanDir_td_today = new ScanDirThread(pointList[i].getAbsolutePath(), "scanDir-td-today[" + i + "]", 0, uploadTd);
+                    ScanDirThread scanDir_td_today = new ScanDirThread(pointList[i].getAbsolutePath(), "scanDir-td-today[" + pointList[i].getName() + "]", 0, uploadTd);
 //                    scanDir_td_today.start();
                     scanService.scheduleWithFixedDelay(scanDir_td_today, 0 , scanningFrequency , TimeUnit.MILLISECONDS);
 
                     //scanDirs 昨天
-                    ScanDirThread scanDir_td_yesterday = new ScanDirThread(pointList[i].getAbsolutePath(), "scanDir-td-yesterday[" + i + "]", -1, uploadTd);
+                    ScanDirThread scanDir_td_yesterday = new ScanDirThread(pointList[i].getAbsolutePath(), "scanDir-td-yesterday[" + pointList[i].getName() + "]", -1, uploadTd);
 //                    scanDir_td_yesterday.start();
                     scanService.scheduleWithFixedDelay(scanDir_td_yesterday, 0 , scanningFrequency , TimeUnit.MILLISECONDS);
                     uploadService.scheduleWithFixedDelay(uploadTd, 30 , 10 , TimeUnit.SECONDS);
@@ -234,7 +234,7 @@ public class MonitorDirUpload2FtpPartitionedQueueScheduled {
                 if(StringUtils.isNotBlank(theDay)){
                     scanningPath = baseMonitorDirPath + File.separator + theDay;
                     candidateFiles = monitorDirUtil.getCandidateFiles(Paths.get(scanningPath));
-                    logger.debug("Scanning No." + scanningNo + " -- Scanning Path: [" + scanningPath + "] get [" + candidateFiles.size() + "] files");
+                    logger.debug(threadName + " Scanning No." + scanningNo + " -- Scanning Path: [" + scanningPath + "] get [" + candidateFiles.size() + "] files");
                 }else{
                     Calendar cal = Calendar.getInstance();
                     cal.setTime(new Date());
@@ -242,15 +242,16 @@ public class MonitorDirUpload2FtpPartitionedQueueScheduled {
                     String datePath = yyyyMMdd.format(cal.getTime());
                     scanningPath = baseMonitorDirPath + File.separator + datePath;
                     candidateFiles = monitorDirUtil.getCandidateFiles(Paths.get(scanningPath));
-                    logger.debug("Scanning No." + scanningNo + " -- Scanning Path: [" + scanningPath + "] get [" + candidateFiles.size() + "] files");
+                    logger.debug(threadName + " Scanning No." + scanningNo + " -- Scanning Path: [" + scanningPath + "] get [" + candidateFiles.size() + "] files");
                 }
                 if(!candidateFiles.isEmpty()){
                     uploadThread.putFileListIntoDealingQueue(candidateFiles);
-                    logger.info(" Put "+ candidateFiles.size() + " files of [" + scanningPath + "] into thread [" + uploadThread.getThreadName() + "]");
+                    logger.info(threadName + " Put "+ candidateFiles.size() + " files of [" + scanningPath + "] into thread [" + uploadThread.getThreadName() + "]");
                     scanningNo++;
                 }
             } catch (Exception e) {
                 logger.error("Found Exception in ScanningThread" + threadName);
+                logger.error(e.getMessage());
                 e.printStackTrace();
             }
         }
@@ -371,7 +372,9 @@ public class MonitorDirUpload2FtpPartitionedQueueScheduled {
 
 
 
-            } catch (InterruptedException | IOException e) {
+            } catch (Exception e) {
+                logger.error("Found Exception in UploadingThread" + threadName);
+                logger.error(e.getMessage());
                 e.printStackTrace();
             }
         }
